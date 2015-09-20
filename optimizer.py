@@ -534,19 +534,15 @@ def write_username_file(profile_fetchable, username_file=USERNAME_FILE):
         except HTTPError:
             pass
 
-def new_users(new_userfile, old_userfile):
-    with open(new_userfile) as F:
-        new_users = F.readlines()
-    with open(old_userfile) as F:
-        old_users = F.readlines()
-    actually_new = []
-    for user in new_users:
-        if user not in old_users:
-            actually_new.append(user.strip())
-    return actually_new
+def transfer_questions(target_user, qbackup, qids=None):
+    for importance in ('mandatory', 'very_important', 'somewhat_important',
+                           'little_important', 'not_important'):
+        for question in getattr(qbackup, importance):
+            if qids is None or question.id in qids:
+                target_user.questions.respond_from_user_question(question, importance)
 
 def backup_user_questions(real=None):
-    if real_user is None: real_user = REAL_DEFAULT
+    if real is None: real = REAL_DEFAULT
     user = login(real)
     global question_counter
     question_counter = 0
