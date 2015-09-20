@@ -59,3 +59,11 @@ target/
 # Emacs files
 *~
 \#*#
+
+# Private files and folders used by okoptimizer
+config.ini
+profiles/
+qbackup/
+valuations/
+users.txt
+deactivated_users.txt
