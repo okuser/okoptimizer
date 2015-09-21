@@ -224,6 +224,7 @@ class Valuations(object):
             for question in getattr(QB, importance):
                 if question.text == qtext:
                     self._rate_question(question)
+                    self.save()
                     return
         print "Question not found!"
 
@@ -280,6 +281,41 @@ class Valuations(object):
         for val in ('categories', 'qcategory', 'qrating', 'dcategory', 'drating', 'dopts'):
             setattr(self, val, getattr(V, val))
 
+class ProfileFilter(object):
+    @classmethod
+    def std_combo(cls, valuations, mp_cutoff, answered_cutoff, ra_cutoff):
+        return cls(valuations).add_mp_filter(mp_cutoff).add_answered_filter(answered_cutoff).add_ra_filter(ra_cutoff)
+
+    def __init__(self, valuations):
+        self.valuations = valuations
+        self.filter_groups = [[]]
+
+    def _and(self, func):
+        for gp in self.filter_groups:
+            gp.append(func)
+        return self
+
+    def _or(self, pf):
+        if pf.valuations is not self.valuations:
+            raise ValueError("valuations mismatch")
+        self.filter_groups.extend(pf.filter_groups)
+        return self
+
+    def add_mp_filter(self, mp_cutoff):
+        return self._and(lambda profile: profile.match_percentage >= mp_cutoff)
+
+    def add_rating_filter(self, min_rating, cat='overall'):
+        return self._and(lambda profile: self.valuations._rate(profile)[0][cat] >= min_rating)
+
+    def add_answered_filter(self, min_answered, cat='overall'):
+        return self._and(lambda profile: self.valuations._rate(profile)[1][cat] >= min_answered)
+
+    def add_ra_filter(self, min_ratio, cat='overall'):
+        return self._and(lambda profile: self.valuations._rate(profile)[0][cat] >= min_ratio * self.valuations._rate(profile)[1][cat])
+
+    def passes(self, profile):
+        return any(all(test(profile) for test in group) for group in self.filter_groups)
+
 class StaticQuestionBackup(object):
     def __init__(self, me):
         for importance in ('mandatory', 'very_important', 'somewhat_important',
@@ -323,12 +359,15 @@ class StaticProfile(object):
             setattr(self, prp, getattr(profile, prp))
 
 class QuestionAnalyzer(object):
-    def __init__(self):
+    def __init__(self, profile_filter = None):
         self.profiles = {}
+        self.profile_filter = profile_filter
         for (dirpath, dirnames, filenames) in os.walk(PROFILE_FOLDER):
             for username in filenames:
                 with open(os.path.join(dirpath, username)) as F:
-                    self.profiles[username] = load(F)
+                    profile = load(F)
+                    if profile_filter is None or profile_filter.passes(profile):
+                        self.profiles[username] = profile
         self.shadow_questions = {}
         self.real_questions = {}
         shadow_file = os.path.join(QUESTION_BACKUP_FOLDER, SHADOW_USERNAME)
@@ -352,6 +391,8 @@ class QuestionAnalyzer(object):
         # my_bad, their_bad, answered
         self.answered = {}
         self.unanswered = {}
+        self.mine_mismatches = defaultdict(list)
+        self.theirs_mismatches = defaultdict(list)
         for profile in self.profiles.itervalues():
             for question in profile.questions:
                 question.username = profile.username
@@ -363,8 +404,10 @@ class QuestionAnalyzer(object):
                         self.qstats[question.id] = [0,0,0]
                     self.qstats[question.id][2] += 1
                     if not question.my_answer_matches:
+                        self.mine_mismatches[question.id].append(profile.username)
                         self.qstats[question.id][0] += 1
                     if not question.their_answer_matches:
+                        self.theirs_mismatches[question.id].append(profile.username)
                         self.qstats[question.id][1] += 1
                 elif (question.id not in self.unanswered
                       and question.id not in self.shadow_questions):
@@ -406,7 +449,7 @@ class QuestionAnalyzer(object):
         for n in range(a, b + 1):
             print "%3s -- %s"%(n, D[n])
 
-    def answer_summary(self, id):
+    def answer_summary(self, id, show_mismatch_users=False):
         Q = self.answered[id]
         n = self.qstats[id][2]
         a = self.qstats[id][0]
@@ -414,7 +457,21 @@ class QuestionAnalyzer(object):
         f = float(a+b) / n
         imp = self.shadow_questions[id].importance
         A = self.shadow_questions[id].answer
-        return u"{:.2f} {:<3}{:<3}{:<4}{}\n          {:<19}{}".format(f, a, b, n, Q, imp, A)
+        ans = u"{:.2f} {:<3}{:<3}{:<4}{}\n          {:<19}{}".format(f, a, b, n, Q, imp, A)
+        if show_mismatch_users:
+            ans += "\n My bad    %s"%(" ".join("%s (%smp %sep %sra)"%(u,
+                                                                      self.profiles[u].match_percentage,
+                                                                      self.profiles[u].enemy_percentage,
+                                                                      '??' if self.profile_filter is None
+                                                                           else self.profile_filter.valuations._rate(self.profiles[u])[0]['overall'])
+                                               for u in self.mine_mismatches[id]))
+            ans += "\n Their bad %s"%(" ".join("%s (%smp %sep %sra)"%(u,
+                                                                      self.profiles[u].match_percentage,
+                                                                      self.profiles[u].enemy_percentage,
+                                                                      '??' if self.profile_filter is None
+                                                                           else self.profile_filter.valuations._rate(self.profiles[u])[0]['overall'])
+                                               for u in self.theirs_mismatches[id]))
+        return ans
 
     def help_reanswer(self, id):
         Q = self.answered[id]
@@ -423,7 +480,7 @@ class QuestionAnalyzer(object):
         imp = self.shadow_questions[id].importance
         return u" {}\n  {}\n  {}\n  {}".format(Q, A, others, imp)
 
-    def best_to_answer(self, n_cutoff=0):
+    def best_to_answer(self, f_cutoff=2.0, n_cutoff=0, show_mismatch_users=False):
         answered = []
         for id in self.answered.iterkeys():
             n = self.qstats[id][2]
@@ -431,9 +488,24 @@ class QuestionAnalyzer(object):
                 a = self.qstats[id][0]
                 b = self.qstats[id][1]
                 f = float(a+b) / n
-                answered.append((f, a, b, -n, id))
+                if f < f_cutoff:
+                    answered.append((f, a, b, -n, id))
         for f, a, b, mn, id in sorted(answered):
-            print self.answer_summary(id)
+            print self.answer_summary(id, show_mismatch_users)
+
+    def qids_to_answer(self, f_cutoff=0.00001, n_cutoff=11):
+        qids = []
+        for id in self.qstats.iterkeys():
+            if id in self.real_questions:
+                continue
+            n = self.qstats[id][2]
+            if n >= n_cutoff:
+                a = self.qstats[id][0]
+                b = self.qstats[id][1]
+                f = float(a+b) / n
+                if f < f_cutoff:
+                    qids.append(id)
+        return qids
 
     def show_questions_to_answer(self, f_cutoff=0.06, n_cutoff=15, by_profile=True):
         reanswers = []
@@ -535,11 +607,15 @@ def write_username_file(profile_fetchable, username_file=USERNAME_FILE):
             pass
 
 def transfer_questions(target_user, qbackup, qids=None):
+    n = 0
     for importance in ('mandatory', 'very_important', 'somewhat_important',
                            'little_important', 'not_important'):
         for question in getattr(qbackup, importance):
             if qids is None or question.id in qids:
+                n += 1
                 target_user.questions.respond_from_user_question(question, importance)
+                if n % 10 == 0:
+                    print "%s questions transferred"%n
 
 def backup_user_questions(real=None):
     if real is None: real = REAL_DEFAULT
@@ -549,3 +625,10 @@ def backup_user_questions(real=None):
     print "Backing up questions for %s"%(REAL_USERNAME if real else SHADOW_USERNAME)
     with open(os.path.join(QUESTION_BACKUP_FOLDER, user.username), "w") as F:
         dump(StaticQuestionBackup(user), F)
+
+def backup_essays(real=True):
+    user = login(real)
+    with open(os.path.join(BASE_FOLDER, 'essay_backup'), "w") as F:
+        dump(StaticEssays(user.profile.essays), F)
+
+setup()
