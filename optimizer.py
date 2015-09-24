@@ -11,8 +11,14 @@ from okcupyd.session import Session, RateLimiter
 import module_locator
 BASE_FOLDER = module_locator.module_path()
 PROFILE_FOLDER = os.path.join(BASE_FOLDER, 'profiles')
+if not os.path.exists(PROFILE_FOLDER):
+    os.makedir(PROFILE_FOLDER)
 QUESTION_BACKUP_FOLDER = os.path.join(BASE_FOLDER, 'qbackup')
+if not os.path.exists(QUESTION_BACKUP_FOLDER):
+    os.makedir(QUESTION_BACKUP_FOLDER)
 VALUATION_FOLDER = os.path.join(BASE_FOLDER, 'valuations')
+if not os.path.exists(VALUATION_FOLDER):
+    os.makedir(VALUATION_FOLDER)
 USERNAME_FILE = os.path.join(BASE_FOLDER, 'users.txt')
 DEACTIVATED_FILE = os.path.join(BASE_FOLDER, 'deactivated_users.txt')
 
@@ -113,7 +119,7 @@ class StaticUserQuestion(object):
 
 class Valuations(object):
     # Stored separately from UserQuestions and QuestionBackups
-    # so that it doesn't get overridden, and so that one
+    # so that it doesn't get overwritten, and so that one
     # could have multiple valuations for
     # long and short term partners
     def __init__(self, categories=None, save_name='prefs'):
@@ -281,6 +287,64 @@ class Valuations(object):
         for val in ('categories', 'qcategory', 'qrating', 'dcategory', 'drating', 'dopts'):
             setattr(self, val, getattr(V, val))
 
+class NightOfAdvice(object):
+    # Stored separately from UserQuestions and QuestionBackups
+    # so that it doesn't get overwritten.
+    # Basically a list of questions you might want to consult
+    # before meeting up with someone.
+    def __init__(self):
+        if os.path.exists(os.path.join(BASE_FOLDER, 'advice')):
+            self.load()
+        else:
+            self.show = []
+            self.hide = set([])
+
+    def add_questions(self, QB, save_interval = 5):
+        n = 0
+        for importance in ('mandatory', 'very_important', 'somewhat_important',
+                           'little_important', 'not_important'):
+            for question in getattr(QB, importance):
+                if question in self.show or question in self.hide:
+                    continue
+                print question.text
+                print "    " + "\n    ".join([a.text for a in question.answer_options])
+                n += 1
+                if n % save_interval == 0:
+                    self.save()
+                s = raw_input('Show? y/[n] ')
+                if s == 'y':
+                    self.show.append(question.id)
+                else:
+                    self.hide.add(question.id)
+        self.save()
+
+    def view(self, username, Q = None):
+        if Q is None:
+            with open(os.path.join(PROFILE_FOLDER, username)) as F:
+                profile = load(F)
+        else:
+            profile = Q.profiles[username]
+        D = {}
+        for id in self.show:
+            D[id] = None
+        for question in profile.questions:
+            if question.id in D and question.their_answer is not None:
+                D[question.id] = (question.text, question.their_answer)
+        for id in self.show:
+            if D[id]:
+                print D[id][0]
+                print "  %s"%(D[id][1])
+
+    def save(self):
+        save_to_file(self, os.path.join(BASE_FOLDER, 'advice'))
+
+    def load(self):
+        filename = os.path.join(BASE_FOLDER, 'advice')
+        with open(filename) as F:
+            A = load(F)
+        self.show = A.show
+        self.hide = A.hide
+
 class ProfileFilter(object):
     @classmethod
     def std_combo(cls, valuations, mp_cutoff, answered_cutoff, ra_cutoff):
@@ -321,6 +385,13 @@ class StaticQuestionBackup(object):
         for importance in ('mandatory', 'very_important', 'somewhat_important',
                            'little_important', 'not_important'):
             setattr(self, importance, [StaticUserQuestion(q) for q in getattr(me.questions, importance)])
+
+    @property
+    def questions(self):
+        for importance in ('mandatory', 'very_important', 'somewhat_important',
+                           'little_important', 'not_important'):
+            for question in getattr(self, importance):
+                yield question
 
 class StaticPhotoInfo(object):
     def __init__(self, photo_info):
