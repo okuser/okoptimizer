@@ -12,13 +12,13 @@ import module_locator
 BASE_FOLDER = module_locator.module_path()
 PROFILE_FOLDER = os.path.join(BASE_FOLDER, 'profiles')
 if not os.path.exists(PROFILE_FOLDER):
-    os.makedir(PROFILE_FOLDER)
+    os.mkdir(PROFILE_FOLDER)
 QUESTION_BACKUP_FOLDER = os.path.join(BASE_FOLDER, 'qbackup')
 if not os.path.exists(QUESTION_BACKUP_FOLDER):
-    os.makedir(QUESTION_BACKUP_FOLDER)
+    os.mkdir(QUESTION_BACKUP_FOLDER)
 VALUATION_FOLDER = os.path.join(BASE_FOLDER, 'valuations')
 if not os.path.exists(VALUATION_FOLDER):
-    os.makedir(VALUATION_FOLDER)
+    os.mkdir(VALUATION_FOLDER)
 USERNAME_FILE = os.path.join(BASE_FOLDER, 'users.txt')
 DEACTIVATED_FILE = os.path.join(BASE_FOLDER, 'deactivated_users.txt')
 
