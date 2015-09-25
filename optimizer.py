@@ -677,12 +677,12 @@ def write_username_file(profile_fetchable, username_file=USERNAME_FILE):
         except HTTPError:
             pass
 
-def transfer_questions(target_user, qbackup, qids=None):
+def transfer_questions(target_user, qbackup, select=None, avoid=None):
     n = 0
     for importance in ('mandatory', 'very_important', 'somewhat_important',
                            'little_important', 'not_important'):
         for question in getattr(qbackup, importance):
-            if qids is None or question.id in qids:
+            if (qids is None or question.id in qids) and (avoid is None or question.id not in avoid):
                 n += 1
                 target_user.questions.respond_from_user_question(question, importance)
                 if n % 10 == 0:
