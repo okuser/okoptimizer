@@ -682,7 +682,7 @@ def transfer_questions(target_user, qbackup, select=None, avoid=None):
     for importance in ('mandatory', 'very_important', 'somewhat_important',
                            'little_important', 'not_important'):
         for question in getattr(qbackup, importance):
-            if (qids is None or question.id in qids) and (avoid is None or question.id not in avoid):
+            if (select is None or question.id in select) and (avoid is None or question.id not in avoid):
                 n += 1
                 target_user.questions.respond_from_user_question(question, importance)
                 if n % 10 == 0:
